@@ -4,7 +4,7 @@ import oauth from "../lib/oauth.js";
 export default async function handler(req, res) {
   try {
     const callback =
-      "https://smugmug-wordpress-importer-9rgy.vercel.app/api/callback";
+  "https://smugmug-wordpress-tool.vercel.app/api/callback";
 
     const request = {
       url: "https://api.smugmug.com/services/oauth/1.0a/getRequestToken",
