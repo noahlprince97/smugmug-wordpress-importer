@@ -9,8 +9,11 @@ export default function handler(req, res) {
     });
   }
 
-  const url =
-    "https://api.smugmug.com/api/v2/user/jsprince!albums";
+  const url = "https://api.smugmug.com/api/v2/user/jsprince!albums";
+
+  const headers = {
+    Accept: "application/json"
+  };
 
   oauth.get(
     url,
@@ -19,12 +22,12 @@ export default function handler(req, res) {
     function (err, data) {
       if (err) {
         console.error(err);
-
         return res.status(500).json(err);
       }
 
       res.setHeader("Content-Type", "application/json");
-      res.status(200).send(data);
-    }
+      res.send(data);
+    },
+    headers
   );
 }
