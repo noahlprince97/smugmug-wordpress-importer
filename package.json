@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "build": "echo \"No build step\""
-  },
   "dependencies": {
     "@vercel/node": "^5.3.24",
     "axios": "^1.11.0"
