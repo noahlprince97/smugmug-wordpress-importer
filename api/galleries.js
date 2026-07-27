@@ -9,27 +9,21 @@ export default function handler(req, res) {
     });
   }
 
-  const url = "https://api.smugmug.com/api/v2!authuser?_verbosity=1";
+  const url =
+    "https://api.smugmug.com/api/v2/user/jsprince!albums";
 
   oauth.get(
     url,
     accessToken,
     accessSecret,
-    function (err, data, response) {
+    function (err, data) {
       if (err) {
-        console.error("OAuth Error:");
         console.error(err);
 
-        return res.status(500).json({
-          error: err,
-        });
+        return res.status(500).json(err);
       }
 
-      console.log("Status:", response?.statusCode);
-      console.log("Headers:", response?.headers);
-      console.log("Body:");
-      console.log(data);
-
+      res.setHeader("Content-Type", "application/json");
       res.status(200).send(data);
     }
   );
