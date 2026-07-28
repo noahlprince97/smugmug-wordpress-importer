@@ -1,6 +1,11 @@
 import { apiUrl, credentialsFromRequest, getAllPages, readJsonBody } from "../lib/api.js";
+import { allowWordPressEditor } from "../lib/cors.js";
 
 export default async function handler(req, res) {
+  if (allowWordPressEditor(req, res)) {
+    return;
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use POST" });
   }
