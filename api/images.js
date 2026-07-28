@@ -5,6 +5,8 @@ function imageSizesFromResponse(payload) {
   const candidates = [
     payload?.Response?.ImageSizes,
     payload?.ImageSizes,
+    payload?.Response?.ImageSizeDetails,
+    payload?.ImageSizeDetails,
     payload?.Response?.ImageSizeDetails?.ImageSizes,
   ];
 
