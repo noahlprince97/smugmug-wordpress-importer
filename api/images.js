@@ -25,6 +25,7 @@ function imageSizesFromResponse(payload) {
 
 async function importableImage(image, accessToken, accessSecret) {
   let url = image.ImageUrl || image.OriginalUrl || image.Url;
+  let thumbnailUrl = image.ThumbnailUrl || image.ThumbUrl;
 
   if (!url) {
     const sizeDetailsUri = image?.Uris?.ImageSizeDetails?.Uri;
@@ -34,11 +35,20 @@ async function importableImage(image, accessToken, accessSecret) {
       // Prefer the largest available display size so Gutenberg receives a high-quality image.
       sizes.sort((left, right) => Number(right.Width || 0) - Number(left.Width || 0));
       url = sizes[0]?.Url;
+
+      // Use a modest size in the picker so selection stays fast for large galleries.
+      const previewSizes = [...sizes].sort((left, right) => {
+        const leftDistance = Math.abs(Number(left.Width || 0) - 320);
+        const rightDistance = Math.abs(Number(right.Width || 0) - 320);
+        return leftDistance - rightDistance;
+      });
+      thumbnailUrl = thumbnailUrl || previewSizes[0]?.Url;
     }
   }
 
   return {
     url,
+    thumbnailUrl: thumbnailUrl || url,
     title: image.Title || image.FileName || "",
     caption: image.Caption || "",
     filename: image.FileName || "",
