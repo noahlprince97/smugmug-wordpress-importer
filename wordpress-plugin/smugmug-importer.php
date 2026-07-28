@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: SmugMug Importer
- * Description: Import SmugMug galleries into WordPress posts.
- * Version: 0.0.1
+ * Description: Import every image from a SmugMug gallery into the current post as Gutenberg image blocks.
+ * Version: 1.0.0
  * Author: Noah Prince
  */
 
@@ -10,36 +10,172 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-add_action('admin_menu', function () {
-    add_menu_page(
-        'SmugMug Importer',
-        'SmugMug',
-        'manage_options',
-        'smugmug-importer',
-        'smugmug_importer_page',
-        'dashicons-format-gallery',
-        30
+define('SMI_OPTION_API_BASE', 'smi_api_base');
+
+function smi_api_base() {
+    return untrailingslashit(get_option(SMI_OPTION_API_BASE, 'https://smugmug-wordpress-tool.vercel.app'));
+}
+
+function smi_current_credentials() {
+    $user_id = get_current_user_id();
+
+    return array(
+        'access_token' => get_user_meta($user_id, 'smi_access_token', true),
+        'access_secret' => get_user_meta($user_id, 'smi_access_secret', true),
+        'nickname' => get_user_meta($user_id, 'smi_nickname', true),
     );
-});
+}
 
-function smugmug_importer_page() {
-?>
-<div class="wrap">
-    <h1>SmugMug Importer</h1>
+function smi_require_editor_request() {
+    if (!current_user_can('edit_posts')) {
+        wp_send_json_error(array('message' => 'You do not have permission to import images.'), 403);
+    }
 
-    <p>🚧 Plugin successfully installed.</p>
+    check_ajax_referer('smi_editor', 'nonce');
+}
 
-    <p>This page will eventually let you:</p>
+function smi_api_request($path, $payload = array()) {
+    $credentials = smi_current_credentials();
 
-    <ol>
-        <li>Connect to SmugMug</li>
-        <li>Select a gallery</li>
-        <li>Import every image into your post</li>
-    </ol>
+    if (!$credentials['access_token'] || !$credentials['access_secret']) {
+        return new WP_Error('smi_not_connected', 'Connect to SmugMug before importing.');
+    }
 
-    <button class="button button-primary">
-        Connect to SmugMug
-    </button>
-</div>
-<?php
+    $response = wp_remote_post(smi_api_base() . '/api/' . ltrim($path, '/'), array(
+        'timeout' => 60,
+        'headers' => array(
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+            'X-SmugMug-Access-Token' => $credentials['access_token'],
+            'X-SmugMug-Access-Secret' => $credentials['access_secret'],
+        ),
+        'body' => wp_json_encode($payload),
+    ));
+
+    if (is_wp_error($response)) {
+        return $response;
+    }
+
+    $status = wp_remote_retrieve_response_code($response);
+    $body = json_decode(wp_remote_retrieve_body($response), true);
+
+    if ($status < 200 || $status >= 300 || !is_array($body)) {
+        return new WP_Error('smi_api_error', is_array($body) && !empty($body['error']) ? $body['error'] : 'SmugMug could not complete this request.');
+    }
+
+    return $body;
+}
+
+function smi_ajax_save_connection() {
+    smi_require_editor_request();
+
+    $access_token = sanitize_text_field(wp_unslash($_POST['accessToken'] ?? ''));
+    $access_secret = sanitize_text_field(wp_unslash($_POST['accessSecret'] ?? ''));
+    $nickname = sanitize_text_field(wp_unslash($_POST['nickname'] ?? ''));
+
+    if (!$access_token || !$access_secret || !$nickname) {
+        wp_send_json_error(array('message' => 'SmugMug did not return complete connection details.'), 400);
+    }
+
+    update_user_meta(get_current_user_id(), 'smi_access_token', $access_token);
+    update_user_meta(get_current_user_id(), 'smi_access_secret', $access_secret);
+    update_user_meta(get_current_user_id(), 'smi_nickname', $nickname);
+    wp_send_json_success(array('nickname' => $nickname));
+}
+add_action('wp_ajax_smi_save_connection', 'smi_ajax_save_connection');
+
+function smi_ajax_disconnect() {
+    smi_require_editor_request();
+    delete_user_meta(get_current_user_id(), 'smi_access_token');
+    delete_user_meta(get_current_user_id(), 'smi_access_secret');
+    delete_user_meta(get_current_user_id(), 'smi_nickname');
+    wp_send_json_success();
+}
+add_action('wp_ajax_smi_disconnect', 'smi_ajax_disconnect');
+
+function smi_ajax_get_galleries() {
+    smi_require_editor_request();
+    $credentials = smi_current_credentials();
+    $result = smi_api_request('galleries', array('nickname' => $credentials['nickname']));
+
+    if (is_wp_error($result)) {
+        wp_send_json_error(array('message' => $result->get_error_message()), 500);
+    }
+
+    wp_send_json_success(array('galleries' => $result['galleries'] ?? array()));
+}
+add_action('wp_ajax_smi_get_galleries', 'smi_ajax_get_galleries');
+
+function smi_ajax_get_images() {
+    smi_require_editor_request();
+    $album_uri = sanitize_text_field(wp_unslash($_POST['albumUri'] ?? ''));
+    $result = smi_api_request('images', array('albumUri' => $album_uri));
+
+    if (is_wp_error($result)) {
+        wp_send_json_error(array('message' => $result->get_error_message()), 500);
+    }
+
+    wp_send_json_success(array('images' => $result['images'] ?? array()));
+}
+add_action('wp_ajax_smi_get_images', 'smi_ajax_get_images');
+
+function smi_enqueue_editor_assets() {
+    wp_enqueue_script(
+        'smugmug-importer-editor',
+        plugins_url('assets/editor.js', __FILE__),
+        array('wp-blocks', 'wp-components', 'wp-data', 'wp-edit-post', 'wp-element', 'wp-i18n', 'wp-plugins'),
+        filemtime(plugin_dir_path(__FILE__) . 'assets/editor.js'),
+        true
+    );
+
+    $api_origin = wp_parse_url(smi_api_base());
+    $api_origin = !empty($api_origin['scheme']) && !empty($api_origin['host'])
+        ? $api_origin['scheme'] . '://' . $api_origin['host'] . (!empty($api_origin['port']) ? ':' . $api_origin['port'] : '')
+        : '';
+
+    wp_localize_script('smugmug-importer-editor', 'SmugMugImporter', array(
+        'ajaxUrl' => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('smi_editor'),
+        'apiBase' => smi_api_base(),
+        'apiOrigin' => $api_origin,
+        'connected' => (bool) smi_current_credentials()['access_token'],
+        'nickname' => smi_current_credentials()['nickname'],
+    ));
+}
+add_action('enqueue_block_editor_assets', 'smi_enqueue_editor_assets');
+
+function smi_register_admin_page() {
+    add_options_page('SmugMug Importer', 'SmugMug Importer', 'manage_options', 'smugmug-importer', 'smi_render_settings_page');
+}
+add_action('admin_menu', 'smi_register_admin_page');
+
+function smi_render_settings_page() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    if (isset($_POST['smi_save_settings'])) {
+        check_admin_referer('smi_save_settings');
+        $api_base = esc_url_raw(wp_unslash($_POST['smi_api_base'] ?? ''));
+        if ($api_base) {
+            update_option(SMI_OPTION_API_BASE, untrailingslashit($api_base));
+            echo '<div class="notice notice-success"><p>Settings saved.</p></div>';
+        }
+    }
+    ?>
+    <div class="wrap">
+        <h1>SmugMug Importer</h1>
+        <p>Set the URL of the deployed SmugMug API. Then open any post in the block editor and use the <strong>SmugMug</strong> sidebar.</p>
+        <form method="post">
+            <?php wp_nonce_field('smi_save_settings'); ?>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="smi_api_base">API base URL</label></th>
+                    <td><input class="regular-text code" id="smi_api_base" name="smi_api_base" type="url" value="<?php echo esc_attr(smi_api_base()); ?>" required></td>
+                </tr>
+            </table>
+            <p class="submit"><button class="button button-primary" name="smi_save_settings" value="1">Save settings</button></p>
+        </form>
+    </div>
+    <?php
 }
