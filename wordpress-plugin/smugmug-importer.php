@@ -93,6 +93,48 @@ function smi_ajax_disconnect() {
 }
 add_action('wp_ajax_smi_disconnect', 'smi_ajax_disconnect');
 
+function smi_ajax_start_connection() {
+    smi_require_editor_request();
+    $state = wp_generate_password(48, false, false);
+    set_transient('smi_oauth_' . $state, get_current_user_id(), 10 * MINUTE_IN_SECONDS);
+    wp_send_json_success(array(
+        'state' => $state,
+        'returnUrl' => admin_url('admin-ajax.php?action=smi_oauth_callback'),
+    ));
+}
+add_action('wp_ajax_smi_start_connection', 'smi_ajax_start_connection');
+
+function smi_ajax_connection_status() {
+    smi_require_editor_request();
+    $credentials = smi_current_credentials();
+    wp_send_json_success(array('connected' => (bool) $credentials['access_token']));
+}
+add_action('wp_ajax_smi_connection_status', 'smi_ajax_connection_status');
+
+function smi_ajax_oauth_callback() {
+    $state = sanitize_text_field(wp_unslash($_POST['state'] ?? ''));
+    $expected_user_id = (int) get_transient('smi_oauth_' . $state);
+
+    if (!$state || !$expected_user_id || $expected_user_id !== get_current_user_id()) {
+        wp_die('This SmugMug sign-in request has expired. Close this window and try again.', 'SmugMug Importer', array('response' => 400));
+    }
+
+    $access_token = sanitize_text_field(wp_unslash($_POST['accessToken'] ?? ''));
+    $access_secret = sanitize_text_field(wp_unslash($_POST['accessSecret'] ?? ''));
+    $nickname = sanitize_text_field(wp_unslash($_POST['nickname'] ?? ''));
+    if (!$access_token || !$access_secret || !$nickname) {
+        wp_die('SmugMug did not return complete connection details. Close this window and try again.', 'SmugMug Importer', array('response' => 400));
+    }
+
+    update_user_meta($expected_user_id, 'smi_access_token', $access_token);
+    update_user_meta($expected_user_id, 'smi_access_secret', $access_secret);
+    update_user_meta($expected_user_id, 'smi_nickname', $nickname);
+    delete_transient('smi_oauth_' . $state);
+
+    wp_die('<p>SmugMug connected. You can close this window and return to your post.</p><script>window.close();</script>', 'SmugMug connected', array('response' => 200));
+}
+add_action('wp_ajax_smi_oauth_callback', 'smi_ajax_oauth_callback');
+
 function smi_ajax_get_galleries() {
     smi_require_editor_request();
     $credentials = smi_current_credentials();

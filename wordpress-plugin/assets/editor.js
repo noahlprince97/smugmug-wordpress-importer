@@ -81,10 +81,28 @@
 
         const connect = function () {
             setError('');
-            const popup = window.open(config.apiBase + '/api/login?origin=' + encodeURIComponent(window.location.origin), 'smugmug-oauth', 'width=620,height=720');
-            if (!popup) {
-                setError('Your browser blocked the SmugMug sign-in window. Allow pop-ups and try again.');
-            }
+            setLoading(true);
+            request('smi_start_connection', {}).then(function (data) {
+                const loginUrl = config.apiBase + '/api/login?origin=' + encodeURIComponent(window.location.origin) + '&returnUrl=' + encodeURIComponent(data.returnUrl) + '&state=' + encodeURIComponent(data.state);
+                const popup = window.open(loginUrl, 'smugmug-oauth', 'width=620,height=720');
+                if (!popup) {
+                    throw new Error('Your browser blocked the SmugMug sign-in window. Allow pop-ups and try again.');
+                }
+                const poll = window.setInterval(function () {
+                    request('smi_connection_status', {}).then(function (status) {
+                        if (status.connected) {
+                            window.clearInterval(poll);
+                            setConnected(true);
+                            setMessage('Connected to SmugMug.');
+                        }
+                    }).catch(function () {});
+                }, 1500);
+                window.setTimeout(function () { window.clearInterval(poll); }, 10 * 60 * 1000);
+            }).catch(function (requestError) {
+                setError(requestError.message);
+            }).finally(function () {
+                setLoading(false);
+            });
         };
 
         const disconnect = function () {
